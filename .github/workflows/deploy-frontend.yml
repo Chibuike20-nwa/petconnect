@@ -1,0 +1,53 @@
+name: Deploy PetConnect Frontend
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/deploy-frontend.yml'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install envsubst
+        run: sudo apt-get update && sudo apt-get install -y gettext-base
+
+      - name: Substitute environment variables
+        env:
+          LA_LIST_ALL_PETS: ${{ secrets.LA_LIST_ALL_PETS }}
+          LA_GET_PET: ${{ secrets.LA_GET_PET }}
+          LA_CREATE_PET: ${{ secrets.LA_CREATE_PET }}
+          LA_UPDATE_PET: ${{ secrets.LA_UPDATE_PET }}
+          LA_DELETE_PET: ${{ secrets.LA_DELETE_PET }}
+        run: |
+          envsubst '${LA_LIST_ALL_PETS} ${LA_GET_PET} ${LA_CREATE_PET} ${LA_UPDATE_PET} ${LA_DELETE_PET}' < frontend/app.js > frontend/app.tmp.js
+          mv frontend/app.tmp.js frontend/app.js
+
+      - name: Upload to Azure Blob Storage
+        uses: azure/CLI@v1
+        with:
+          azcliversion: latest
+          inlineScript: |
+            az storage blob upload-batch \
+              --account-name petconnectb911346 \
+              --account-key "${{ secrets.PETCONNECT_STORAGE_KEY }}" \
+              --destination '$web' \
+              --source frontend/ \
+              --overwrite \
+              --content-cache-control "max-age=3600"
+
+      - name: Purge CDN (if applicable)
+        continue-on-error: true
+        uses: azure/CLI@v1
+        with:
+          azcliversion: latest
+          inlineScript: |
+            echo "Frontend deployed successfully to Azure Static Website"
+            echo "URL: https://petconnectb911346.z33.web.core.windows.net"

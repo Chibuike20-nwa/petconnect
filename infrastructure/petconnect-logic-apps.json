@@ -1,0 +1,516 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "location":           { "type": "string",       "defaultValue": "[resourceGroup().location]" },
+    "cosmosAccountName":  { "type": "string",       "defaultValue": "petconnect-cosmos-chibuike" },
+    "cosmosKey":          { "type": "securestring" },
+    "storageAccountName": { "type": "string",       "defaultValue": "petconnectb911346" },
+    "storageAccountKey":  { "type": "securestring" },
+    "storageEndpoint":    { "type": "string",       "defaultValue": "https://petconnectb911346.blob.core.windows.net" }
+  },
+  "variables": {
+    "cosmosConn": "petconnect-cosmosdb",
+    "blobConn":   "petconnect-azureblob"
+  },
+  "resources": [
+
+    {
+      "type": "Microsoft.Web/connections",
+      "apiVersion": "2016-06-01",
+      "name": "[variables('cosmosConn')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "displayName": "NexusMedia CosmosDB",
+        "api": { "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', parameters('location'), 'documentdb')]" },
+        "parameterValues": {
+          "databaseAccount": "[parameters('cosmosAccountName')]",
+          "accessKey":       "[parameters('cosmosKey')]"
+        }
+      }
+    },
+
+    {
+      "type": "Microsoft.Web/connections",
+      "apiVersion": "2016-06-01",
+      "name": "[variables('blobConn')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "displayName": "NexusMedia BlobStorage",
+        "api": { "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', parameters('location'), 'azureblob')]" },
+        "parameterValues": {
+          "accountName": "[parameters('storageAccountName')]",
+          "accessKey":   "[parameters('storageAccountKey')]"
+        }
+      }
+    },
+
+    {
+      "type": "Microsoft.Logic/workflows",
+      "apiVersion": "2019-05-01",
+      "name": "petconnect-list-all-pets",
+      "location": "[parameters('location')]",
+      "dependsOn": [ "[resourceId('Microsoft.Web/connections', variables('cosmosConn'))]" ],
+      "properties": {
+        "state": "Enabled",
+        "definition": {
+          "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+          "contentVersion": "1.0.0.0",
+          "parameters": { "$connections": { "defaultValue": {}, "type": "Object" } },
+          "triggers": {
+            "manual": {
+              "type": "Request", "kind": "Http",
+              "inputs": { "method": "GET", "schema": {} }
+            }
+          },
+          "actions": {
+            "Query_assets": {
+              "type": "ApiConnection",
+              "inputs": {
+                "host": { "connection": { "name": "@parameters('$connections')['documentdb']['connectionId']" } },
+                "method": "get",
+                "path": "/dbs/@{encodeURIComponent('petdb')}/colls/@{encodeURIComponent('pets')}/docs"
+              }
+            },
+            "Response": {
+              "type": "Response", "kind": "Http",
+              "runAfter": { "Query_assets": ["Succeeded"] },
+              "inputs": {
+                "statusCode": 200,
+                "headers": { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+                "body": "@body('Query_assets')?['Documents']"
+              }
+            }
+          }
+        },
+        "parameters": {
+          "$connections": { "value": {
+            "documentdb": {
+              "connectionId":   "[resourceId('Microsoft.Web/connections', variables('cosmosConn'))]",
+              "connectionName": "[variables('cosmosConn')]",
+              "id":             "[subscriptionResourceId('Microsoft.Web/locations/managedApis', parameters('location'), 'documentdb')]"
+            }
+          }}
+        }
+      }
+    },
+
+    {
+      "type": "Microsoft.Logic/workflows",
+      "apiVersion": "2019-05-01",
+      "name": "petconnect-get-pet",
+      "location": "[parameters('location')]",
+      "dependsOn": [ "[resourceId('Microsoft.Web/connections', variables('cosmosConn'))]" ],
+      "properties": {
+        "state": "Enabled",
+        "definition": {
+          "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+          "contentVersion": "1.0.0.0",
+          "parameters": { "$connections": { "defaultValue": {}, "type": "Object" } },
+          "triggers": {
+            "manual": {
+              "type": "Request", "kind": "Http",
+              "inputs": { "method": "GET", "relativePath": "/{id}", "schema": {} }
+            }
+          },
+          "actions": {
+            "Get_document": {
+              "type": "ApiConnection",
+              "inputs": {
+                "host": { "connection": { "name": "@parameters('$connections')['documentdb']['connectionId']" } },
+                "method": "get",
+                "path": "/dbs/@{encodeURIComponent('petdb')}/colls/@{encodeURIComponent('pets')}/docs/@{encodeURIComponent(triggerOutputs()['relativePathParameters']['id'])}",
+                "headers": { "x-ms-documentdb-partitionkey": "@{triggerOutputs()['relativePathParameters']['id']}" }
+              }
+            },
+            "Response_OK": {
+              "type": "Response", "kind": "Http",
+              "runAfter": { "Get_document": ["Succeeded"] },
+              "inputs": {
+                "statusCode": 200,
+                "headers": { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+                "body": "@body('Get_document')"
+              }
+            },
+            "Response_404": {
+              "type": "Response", "kind": "Http",
+              "runAfter": { "Get_document": ["Failed"] },
+              "inputs": {
+                "statusCode": 404,
+                "headers": { "Access-Control-Allow-Origin": "*" },
+                "body": { "error": "Asset not found" }
+              }
+            }
+          }
+        },
+        "parameters": {
+          "$connections": { "value": {
+            "documentdb": {
+              "connectionId":   "[resourceId('Microsoft.Web/connections', variables('cosmosConn'))]",
+              "connectionName": "[variables('cosmosConn')]",
+              "id":             "[subscriptionResourceId('Microsoft.Web/locations/managedApis', parameters('location'), 'documentdb')]"
+            }
+          }}
+        }
+      }
+    },
+
+    {
+      "type": "Microsoft.Logic/workflows",
+      "apiVersion": "2019-05-01",
+      "name": "petconnect-create-pet",
+      "location": "[parameters('location')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/connections', variables('cosmosConn'))]",
+        "[resourceId('Microsoft.Web/connections', variables('blobConn'))]"
+      ],
+      "properties": {
+        "state": "Enabled",
+        "definition": {
+          "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+          "contentVersion": "1.0.0.0",
+          "parameters": {
+            "$connections":    { "defaultValue": {}, "type": "Object" },
+            "storageEndpoint": { "type": "string",  "defaultValue": "https://petconnectb911346.blob.core.windows.net" }
+          },
+          "triggers": {
+            "manual": {
+              "type": "Request", "kind": "Http",
+              "inputs": { "schema": {} }
+            }
+          },
+          "actions": {
+            "Init_assetId": {
+              "type": "InitializeVariable",
+              "inputs": { "variables": [{ "name": "assetId",  "type": "string", "value": "" }] }
+            },
+            "Init_blobName": {
+              "type": "InitializeVariable",
+              "runAfter": { "Init_assetId": ["Succeeded"] },
+              "inputs": { "variables": [{ "name": "blobName", "type": "string", "value": "" }] }
+            },
+            "Is_Preflight": {
+              "type": "If",
+              "runAfter": { "Init_blobName": ["Succeeded"] },
+              "expression": {
+                "and": [{ "not": { "equals": [
+                  "@coalesce(triggerOutputs()?['headers']?['Access-Control-Request-Method'], '')", ""
+                ]}}]
+              },
+              "actions": {
+                "Preflight_Response": {
+                  "type": "Response", "kind": "Http",
+                  "inputs": {
+                    "statusCode": 200,
+                    "headers": {
+                      "Access-Control-Allow-Origin":  "*",
+                      "Access-Control-Allow-Methods": "POST, OPTIONS",
+                      "Access-Control-Allow-Headers": "Content-Type"
+                    }
+                  }
+                },
+                "Terminate_Preflight": {
+                  "type": "Terminate",
+                  "runAfter": { "Preflight_Response": ["Succeeded"] },
+                  "inputs": { "runStatus": "Succeeded" }
+                }
+              },
+              "else": {
+                "actions": {
+                  "Set_assetId": {
+                    "type": "SetVariable",
+                    "inputs": { "name": "assetId", "value": "@{guid()}" }
+                  },
+                  "Set_blobName": {
+                    "type": "SetVariable",
+                    "runAfter": { "Set_assetId": ["Succeeded"] },
+                    "inputs": {
+                      "name": "blobName",
+                      "value": "@{if(contains(triggerBody()?['fileName'], '.'), concat(variables('assetId'), '.', last(split(triggerBody()?['fileName'], '.'))), concat(variables('assetId'), '.bin'))}"
+                    }
+                  },
+                  "Create_blob": {
+                    "type": "ApiConnection",
+                    "runAfter": { "Set_blobName": ["Succeeded"] },
+                    "inputs": {
+                      "host": { "connection": { "name": "@parameters('$connections')['azureblob']['connectionId']" } },
+                      "method": "post",
+                      "path": "/datasets/default/files",
+                      "queries": {
+                        "folderPath": "/pet-images",
+                        "name": "@{variables('blobName')}",
+                        "queryParametersSingleEncoded": true
+                      },
+                      "body": "@base64ToBinary(triggerBody()?['fileContent'])"
+                    }
+                  },
+                  "Create_document": {
+                    "type": "ApiConnection",
+                    "runAfter": { "Create_blob": ["Succeeded"] },
+                    "inputs": {
+                      "host": { "connection": { "name": "@parameters('$connections')['documentdb']['connectionId']" } },
+                      "method": "post",
+                      "path": "/dbs/@{encodeURIComponent('petdb')}/colls/@{encodeURIComponent('pets')}/docs",
+                      "headers": {
+                        "x-ms-documentdb-partitionkey": "@{variables('assetId')}"
+                      },
+                      "body": {
+                        "id":          "@{variables('assetId')}",
+                        "fileName":    "@{triggerBody()?['fileName']}",
+                        "fileLocator": "@{concat(parameters('storageEndpoint'), '/pet-images/', variables('blobName'))}",
+                        "userID":      "@{triggerBody()?['userID']}",
+                        "contentType": "@{triggerBody()?['contentType']}",
+                        "createdAt":   "@{utcNow()}",
+                        "updatedAt":   "@{utcNow()}"
+                      }
+                    }
+                  },
+                  "Response_Created": {
+                    "type": "Response", "kind": "Http",
+                    "runAfter": { "Create_document": ["Succeeded"] },
+                    "inputs": {
+                      "statusCode": 201,
+                      "headers": { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+                      "body": "@body('Create_document')"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": {
+          "$connections": { "value": {
+            "documentdb": {
+              "connectionId":   "[resourceId('Microsoft.Web/connections', variables('cosmosConn'))]",
+              "connectionName": "[variables('cosmosConn')]",
+              "id":             "[subscriptionResourceId('Microsoft.Web/locations/managedApis', parameters('location'), 'documentdb')]"
+            },
+            "azureblob": {
+              "connectionId":   "[resourceId('Microsoft.Web/connections', variables('blobConn'))]",
+              "connectionName": "[variables('blobConn')]",
+              "id":             "[subscriptionResourceId('Microsoft.Web/locations/managedApis', parameters('location'), 'azureblob')]"
+            }
+          }},
+          "storageEndpoint": { "value": "[parameters('storageEndpoint')]" }
+        }
+      }
+    },
+
+    {
+      "type": "Microsoft.Logic/workflows",
+      "apiVersion": "2019-05-01",
+      "name": "petconnect-update-pet",
+      "location": "[parameters('location')]",
+      "dependsOn": [ "[resourceId('Microsoft.Web/connections', variables('cosmosConn'))]" ],
+      "properties": {
+        "state": "Enabled",
+        "definition": {
+          "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+          "contentVersion": "1.0.0.0",
+          "parameters": { "$connections": { "defaultValue": {}, "type": "Object" } },
+          "triggers": {
+            "manual": {
+              "type": "Request", "kind": "Http",
+              "inputs": { "schema": {} }
+            }
+          },
+          "actions": {
+            "Is_Preflight": {
+              "type": "If",
+              "expression": {
+                "and": [{ "not": { "equals": [
+                  "@coalesce(triggerOutputs()?['headers']?['Access-Control-Request-Method'], '')", ""
+                ]}}]
+              },
+              "actions": {
+                "Preflight_Response": {
+                  "type": "Response", "kind": "Http",
+                  "inputs": {
+                    "statusCode": 200,
+                    "headers": {
+                      "Access-Control-Allow-Origin":  "*",
+                      "Access-Control-Allow-Methods": "PUT, POST, OPTIONS",
+                      "Access-Control-Allow-Headers": "Content-Type"
+                    }
+                  }
+                },
+                "Terminate_Preflight": {
+                  "type": "Terminate",
+                  "runAfter": { "Preflight_Response": ["Succeeded"] },
+                  "inputs": { "runStatus": "Succeeded" }
+                }
+              },
+              "else": {
+                "actions": {
+                  "Get_document": {
+                    "type": "ApiConnection",
+                    "inputs": {
+                      "host": { "connection": { "name": "@parameters('$connections')['documentdb']['connectionId']" } },
+                      "method": "get",
+                      "path": "/dbs/@{encodeURIComponent('petdb')}/colls/@{encodeURIComponent('pets')}/docs/@{encodeURIComponent(triggerBody()?['id'])}",
+                      "headers": { "x-ms-documentdb-partitionkey": "@{triggerBody()?['id']}" }
+                    }
+                  },
+                  "Compose_updated": {
+                    "type": "Compose",
+                    "runAfter": { "Get_document": ["Succeeded"] },
+                    "inputs": {
+                      "id":          "@{triggerBody()?['id']}",
+                      "fileName":    "@{coalesce(triggerBody()?['fileName'], body('Get_document')?['fileName'])}",
+                      "fileLocator": "@{body('Get_document')?['fileLocator']}",
+                      "userID":      "@{coalesce(triggerBody()?['userID'],   body('Get_document')?['userID'])}",
+                      "contentType": "@{body('Get_document')?['contentType']}",
+                      "createdAt":   "@{body('Get_document')?['createdAt']}",
+                      "updatedAt":   "@{utcNow()}"
+                    }
+                  },
+                  "Upsert_document": {
+                    "type": "ApiConnection",
+                    "runAfter": { "Compose_updated": ["Succeeded"] },
+                    "inputs": {
+                      "host": { "connection": { "name": "@parameters('$connections')['documentdb']['connectionId']" } },
+                      "method": "post",
+                      "path": "/dbs/@{encodeURIComponent('petdb')}/colls/@{encodeURIComponent('pets')}/docs",
+                      "headers": {
+                        "x-ms-documentdb-is-upsert": "true",
+                        "x-ms-documentdb-partitionkey": "@{triggerBody()?['id']}"
+                      },
+                      "body": "@outputs('Compose_updated')"
+                    }
+                  },
+                  "Response_OK": {
+                    "type": "Response", "kind": "Http",
+                    "runAfter": { "Upsert_document": ["Succeeded"] },
+                    "inputs": {
+                      "statusCode": 200,
+                      "headers": { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+                      "body": "@body('Upsert_document')"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": {
+          "$connections": { "value": {
+            "documentdb": {
+              "connectionId":   "[resourceId('Microsoft.Web/connections', variables('cosmosConn'))]",
+              "connectionName": "[variables('cosmosConn')]",
+              "id":             "[subscriptionResourceId('Microsoft.Web/locations/managedApis', parameters('location'), 'documentdb')]"
+            }
+          }}
+        }
+      }
+    },
+
+    {
+      "type": "Microsoft.Logic/workflows",
+      "apiVersion": "2019-05-01",
+      "name": "petconnect-delete-pet",
+      "location": "[parameters('location')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/connections', variables('cosmosConn'))]",
+        "[resourceId('Microsoft.Web/connections', variables('blobConn'))]"
+      ],
+      "properties": {
+        "state": "Enabled",
+        "definition": {
+          "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+          "contentVersion": "1.0.0.0",
+          "parameters": { "$connections": { "defaultValue": {}, "type": "Object" } },
+          "triggers": {
+            "manual": {
+              "type": "Request", "kind": "Http",
+              "inputs": { "schema": {} }
+            }
+          },
+          "actions": {
+            "Is_Preflight": {
+              "type": "If",
+              "expression": {
+                "and": [{ "not": { "equals": [
+                  "@coalesce(triggerOutputs()?['headers']?['Access-Control-Request-Method'], '')", ""
+                ]}}]
+              },
+              "actions": {
+                "Preflight_Response": {
+                  "type": "Response", "kind": "Http",
+                  "inputs": {
+                    "statusCode": 200,
+                    "headers": {
+                      "Access-Control-Allow-Origin":  "*",
+                      "Access-Control-Allow-Methods": "DELETE, POST, OPTIONS",
+                      "Access-Control-Allow-Headers": "Content-Type"
+                    }
+                  }
+                },
+                "Terminate_Preflight": {
+                  "type": "Terminate",
+                  "runAfter": { "Preflight_Response": ["Succeeded"] },
+                  "inputs": { "runStatus": "Succeeded" }
+                }
+              },
+              "else": {
+                "actions": {
+                  "Get_document": {
+                    "type": "ApiConnection",
+                    "inputs": {
+                      "host": { "connection": { "name": "@parameters('$connections')['documentdb']['connectionId']" } },
+                      "method": "get",
+                      "path": "/dbs/@{encodeURIComponent('petdb')}/colls/@{encodeURIComponent('pets')}/docs/@{encodeURIComponent(triggerBody()?['id'])}",
+                      "headers": { "x-ms-documentdb-partitionkey": "@{triggerBody()?['id']}" }
+                    }
+                  },
+                  "Delete_blob": {
+                    "type": "ApiConnection",
+                    "runAfter": { "Get_document": ["Succeeded"] },
+                    "inputs": {
+                      "host": { "connection": { "name": "@parameters('$connections')['azureblob']['connectionId']" } },
+                      "method": "delete",
+                      "path": "/datasets/default/files/@{encodeURIComponent(encodeURIComponent(concat('/media/', last(split(body('Get_document')?['fileLocator'], '/')))))}"
+                    }
+                  },
+                  "Delete_document": {
+                    "type": "ApiConnection",
+                    "runAfter": { "Delete_blob": ["Succeeded", "Failed"] },
+                    "inputs": {
+                      "host": { "connection": { "name": "@parameters('$connections')['documentdb']['connectionId']" } },
+                      "method": "delete",
+                      "path": "/dbs/@{encodeURIComponent('petdb')}/colls/@{encodeURIComponent('pets')}/docs/@{encodeURIComponent(triggerBody()?['id'])}",
+                      "headers": { "x-ms-documentdb-partitionkey": "@{triggerBody()?['id']}" }
+                    }
+                  },
+                  "Response_204": {
+                    "type": "Response", "kind": "Http",
+                    "runAfter": { "Delete_document": ["Succeeded"] },
+                    "inputs": {
+                      "statusCode": 204,
+                      "headers": { "Access-Control-Allow-Origin": "*" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": {
+          "$connections": { "value": {
+            "documentdb": {
+              "connectionId":   "[resourceId('Microsoft.Web/connections', variables('cosmosConn'))]",
+              "connectionName": "[variables('cosmosConn')]",
+              "id":             "[subscriptionResourceId('Microsoft.Web/locations/managedApis', parameters('location'), 'documentdb')]"
+            },
+            "azureblob": {
+              "connectionId":   "[resourceId('Microsoft.Web/connections', variables('blobConn'))]",
+              "connectionName": "[variables('blobConn')]",
+              "id":             "[subscriptionResourceId('Microsoft.Web/locations/managedApis', parameters('location'), 'azureblob')]"
+            }
+          }}
+        }
+      }
+    }
+
+  ]
+}

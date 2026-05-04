@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PetConnect — Pet Records Management</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- Header -->
+  <header class="pc-header">
+    <div class="container">
+      <div class="header-content">
+        <div class="logo">
+          <i class="bi bi-heart-fill"></i>
+          <span>PetConnect</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="container">
+
+    <!-- Upload Section -->
+    <section class="upload-section">
+      <h2 class="section-title">
+        <i class="bi bi-cloud-upload"></i>
+        Add New Pet
+      </h2>
+
+      <div class="upload-card">
+        <div class="upload-row">
+          <!-- Drop Zone -->
+          <div class="dropzone" id="dropZone" tabindex="0">
+            <input type="file" id="fileInput" hidden>
+
+            <div id="dropDefault" class="drop-content">
+              <i class="bi bi-image"></i>
+              <p class="drop-title">Drop pet photo here</p>
+              <p class="drop-subtitle">or click to browse</p>
+              <p class="drop-formats">All file types supported</p>
+            </div>
+
+            <div id="dropPreview" class="drop-preview d-none">
+              <div id="previewThumb" class="preview-thumb"></div>
+              <div class="preview-info">
+                <div id="previewName" class="preview-name"></div>
+                <div id="previewMeta" class="preview-meta"></div>
+              </div>
+              <button id="clearFileBtn" class="clear-btn" title="Remove file">
+                <i class="bi bi-x-circle-fill"></i>
+              </button>
+            </div>
+          </div>
+
+          <!-- Form Fields -->
+          <div class="upload-form">
+            <div class="form-group">
+              <label for="petName">
+                <i class="bi bi-tag"></i>
+                Pet Name
+              </label>
+              <input type="text" id="petName" placeholder="e.g., Buddy" required>
+            </div>
+
+
+            <div class="form-group">
+              <label for="ownerName">
+                <i class="bi bi-person"></i>
+                Owner Name
+              </label>
+              <input type="text" id="ownerName" placeholder="e.g., John Doe" required>
+            </div>
+
+            <div class="form-group">
+              <label for="notes">
+                <i class="bi bi-pencil"></i>
+                Notes
+              </label>
+              <textarea id="notes" rows="3" placeholder="Additional information about your pet..."></textarea>
+            </div>
+
+            <button id="uploadBtn" class="btn-upload" disabled>
+              <i class="bi bi-upload"></i>
+              Upload Pet Record
+            </button>
+
+            <div id="uploadProgress" class="upload-progress d-none">
+              <div class="progress-spinner"></div>
+              <span>Uploading pet record...</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Stats -->
+    <section class="stats-section">
+      <div class="stat-card" id="statTotal">
+        <i class="bi bi-collection"></i>
+        <div>
+          <div class="stat-num">0</div>
+          <div class="stat-label">Total Pets</div>
+        </div>
+      </div>
+      <div class="stat-card" id="statImages">
+        <i class="bi bi-image"></i>
+        <div>
+          <div class="stat-num">0</div>
+          <div class="stat-label">Images</div>
+        </div>
+      </div>
+      <div class="stat-card" id="statVideos">
+        <i class="bi bi-camera-video"></i>
+        <div>
+          <div class="stat-num">0</div>
+          <div class="stat-label">Videos</div>
+        </div>
+      </div>
+      <div class="stat-card" id="statOther">
+        <i class="bi bi-file-earmark"></i>
+        <div>
+          <div class="stat-num">0</div>
+          <div class="stat-label">Others</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Gallery Section -->
+    <section class="gallery-section">
+      <div class="gallery-header">
+        <h2 class="section-title">
+          <i class="bi bi-grid-3x3-gap"></i>
+          Pet Gallery
+        </h2>
+
+        <div class="gallery-controls">
+          <div class="search-box">
+            <i class="bi bi-search"></i>
+            <input type="text" id="searchInput" placeholder="Search pets or owners...">
+          </div>
+
+          <div class="filter-pills">
+            <button class="pill active" onclick="setFilter('all', this)">All</button>
+            <button class="pill" onclick="setFilter('image', this)">Images</button>
+            <button class="pill" onclick="setFilter('video', this)">Videos</button>
+            <button class="pill" onclick="setFilter('other', this)">Other</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="gallery" class="pet-gallery"></div>
+    </section>
+
+  </main>
+
+  <!-- Lightbox -->
+  <div id="lightbox" class="lightbox hidden">
+    <div class="lb-backdrop" onclick="closeLightbox()"></div>
+    <div class="lb-content">
+      <button class="lb-close" onclick="closeLightbox()">
+        <i class="bi bi-x-lg"></i>
+      </button>
+      <img id="lightboxImg" src="" alt="" class="hidden">
+      <video id="lightboxVideo" src="" controls class="hidden" style="max-width:90vw;max-height:90vh;border-radius:12px"></video>
+    </div>
+  </div>
+
+  <!-- Edit Modal -->
+  <div id="editOverlay" class="modal-overlay hidden">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3><i class="bi bi-pencil"></i> Edit Pet Record</h3>
+        <button class="modal-close" onclick="closeModal('edit')">
+          <i class="bi bi-x-lg"></i>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="editPetName">Pet Name</label>
+          <input type="text" id="editPetName">
+        </div>
+        <div class="form-group">
+          <label for="editOwnerName">Owner Name</label>
+          <input type="text" id="editOwnerName">
+        </div>
+        <div class="form-group">
+          <label for="editNotes">Notes</label>
+          <textarea id="editNotes" rows="3"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closeModal('edit')">Cancel</button>
+        <button class="btn-primary" id="saveEditBtn">Save Changes</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Delete Modal -->
+  <div id="deleteOverlay" class="modal-overlay hidden">
+    <div class="modal-box modal-danger">
+      <div class="modal-header">
+        <h3><i class="bi bi-trash"></i> Delete Pet Record</h3>
+        <button class="modal-close" onclick="closeModal('delete')">
+          <i class="bi bi-x-lg"></i>
+        </button>
+      </div>
+      <div class="modal-body">
+        <p>Are you sure you want to delete <strong id="deleteModalName"></strong>?</p>
+        <p class="text-muted">This action cannot be undone. The photo and all metadata will be permanently removed.</p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closeModal('delete')">Cancel</button>
+        <button class="btn-danger" id="confirmDeleteBtn">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Stack -->
+  <div id="toastStack" class="toast-stack"></div>
+
+  <!-- Footer -->
+  <footer class="pc-footer">
+    <p>COM682 Cloud Native Development — Coursework 2</p>
+    <p>Azure Logic Apps • Cosmos DB • Blob Storage</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
